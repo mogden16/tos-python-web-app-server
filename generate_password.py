@@ -1,0 +1,23 @@
+# GENERATE ENCRYPTED PASSWORD WITH BCRYPT
+# STORE THE DECODED HASHED PASSWORD IN YOUR MONGO DB IN THE USER COLLECTION ROOT
+# ALONG WITH A USERNAME
+# PASSWORD HAS TO BE ENCODED INTO BYTES
+import bcrypt
+
+# ENTER PASSWORD OF YOUR CHOICE
+password = b"Secret Password"
+
+# THIS HASHES THE PASSWORD ABOVE
+hashed = bcrypt.hashpw(password, bcrypt.gensalt())
+
+# STORE THIS HASH INTO THE PASSWORD KEY/VALUE PAIR IN MONGO IN THE USER COLLECTION ROOT
+print("\n", hashed.decode("utf-8"), "\n")
+
+# THIS CHECKS THAT THE PASSWORD AND HASH ARE A MATCH TO VERFIY YOU ARE GOOD TO GO
+if bcrypt.checkpw(password, hashed):
+
+    print("Match\n")
+
+else:
+
+    print("No Match\n")

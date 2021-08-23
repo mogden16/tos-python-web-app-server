@@ -47,10 +47,12 @@ def checkAuthToken():
 def login():
 
     try:
-
+        
         username = request.json["username"]
 
         password = request.json["password"]
+
+        print(username, password)
 
         user = mongo.db.users.find_one({
             "Username": username
@@ -58,11 +60,11 @@ def login():
 
         if user:
 
-            for account_id, info in user["Accounts"].items():
+            for account_id in user["Accounts"].keys():
 
-                if info["Account_Type"] == "PRIMARY":
+                initial_account_id = account_id
 
-                    initial_account_id = account_id
+                break
 
             if bcrypt.check_password_hash(user["Password"], password):
 
@@ -83,7 +85,9 @@ def login():
 
         return jsonify({"error": "Invalid Credentials"}), 401
 
-    except:
+    except Exception as e:
+
+        print(e)
 
         logger.WARNING(f"Invalid Credentials")
 
