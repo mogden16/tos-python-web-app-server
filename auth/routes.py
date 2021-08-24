@@ -52,19 +52,11 @@ def login():
 
         password = request.json["password"]
 
-        print(username, password)
-
         user = mongo.db.users.find_one({
             "Username": username
         })
 
         if user:
-
-            for account_id in user["Accounts"].keys():
-
-                initial_account_id = account_id
-
-                break
 
             if bcrypt.check_password_hash(user["Password"], password):
 
@@ -78,7 +70,18 @@ def login():
 
                 logger.INFO(f"Login Successful - USERNAME:{username}")
 
-                return jsonify({"token": token, "initial_account_id": initial_account_id})
+                del user["Username"]
+
+                del user["Password"]
+
+                del user["_id"]
+
+                obj = {
+                    "Username" : user["Name"], 
+                    "Account_IDs" : [account_id for account_id in user["Accounts"].keys()]
+                }
+
+                return jsonify({"token": token, "data" : obj})
 
         logger.WARNING(
             f"Invalid Credentials - USERNAME:{username} PASSWORD:{password}")
@@ -86,7 +89,6 @@ def login():
         return jsonify({"error": "Invalid Credentials"}), 401
 
     except Exception as e:
-
         print(e)
 
         logger.WARNING(f"Invalid Credentials")

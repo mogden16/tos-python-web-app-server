@@ -20,6 +20,7 @@ api = Blueprint("api", __name__, url_prefix="/api")
 
 logger = Logger()
 
+
 def token_required(f):
     """ METHOD IS A DECORATOR THATS CHECKS IF TOKEN IS VALID
     Args:
@@ -63,168 +64,131 @@ def token_required(f):
 ##########################################################
 ## GET REQUESTS ##########################################
 
-# OPEN POSITIONS
 
-
-@api.route("/open_positions/<account_id>", methods=["GET"])
+@api.route("/account_status/<account_id>", methods=["GET"])
 @token_required
-def get_open_positions(current_user, account_id):
-    """ METHOD THAT GETS ALL OPEN POSITIONS FOR USER
-    Args:
-        current_user ([dict]): CURRENT USER DATA
-        account_id ([int]): CURRENT ACCOUNT ID
-    Returns:
-        [json]: ALL OPEN POSITION DATA
-    """
+def fetch_account_status(current_user, account_id):
 
     try:
 
-        # SPLIT DATA INTO SECTIONS TO ALLOW FOR EASY USE ON FRONT END
-        # POSITIONS, OVERALL, TODAY, STRATEGIES
+        # query the user collection for account status
+        status = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+            "Accounts"][account_id]["Active"]
 
-        open_positions = mongo.db.open_positions.find(
-            {"Trader": current_user["Name"], "Account_ID": account_id})
+        return jsonify({"account_status": status, "account_id": account_id}), 200
 
-        obj = {
-            "Positions": [],
-            "Overall": {
-                "Positions": 0,
-                "ROV": 0,
-                "Avg_ROV": 0,
-                "Profit_Loss": 0
-            },
-            "Today": {
-                "Positions": 0,
-                "ROV": 0,
-                "Avg_ROV": 0,
-                "Profit_Loss": 0
-            },
-            "Strategies": {}
-        }
+    except KeyError:
 
-        i = 0
-
-        overall_avg_rov = []
-
-        today_avg_rov = []
-
-        todays_date = getDatetime().strftime("%Y-%m-%d")
-
-        for position in open_positions:
-
-            if position["Last_Price"] == 0:
-
-                continue
-
-            i += 1
-
-            del position["_id"]
-
-            position["id"] = i
-
-            qty = position["Qty"]
-
-            position["Overall_Change"] = round(
-                ((position["Last_Price"] / position["Buy_Price"]) - 1) * 100, 2)
-
-            position["Today_Change"] = round(
-                ((position["Last_Price"] / position["Opening_Price"]) - 1) * 100, 2)
-
-            obj["Positions"].append(position)
-
-            obj["Overall"]["Positions"] += 1
-
-            last_price = position["Last_Price"]
-
-            buy_price = position["Buy_Price"]
-
-            opening_price = position["Opening_Price"]
-
-            position_date = datetime.strftime(position["Date"], "%Y-%m-%d")
-
-            if position_date == todays_date:
-
-                obj["Today"]["Positions"] += 1
-
-            obj["Today"]["ROV"] += round(((last_price /
-                                           opening_price) - 1) * 100, 2)
-
-            obj["Overall"]["ROV"] += round(
-                ((last_price / buy_price) - 1) * 100, 2)
-
-            obj["Today"]["Profit_Loss"] += round(
-                ((last_price * qty) - (opening_price * qty)), 2)
-
-            obj["Overall"]["Profit_Loss"] += round(
-                ((last_price * qty) - (buy_price * qty)), 2)
-
-            overall_avg_rov.append(
-                round(((last_price / buy_price) - 1) * 100, 2))
-
-            today_avg_rov.append(
-                round(((last_price / opening_price) - 1) * 100, 2))
-
-            strategy = position["Strategy"]
-
-            if strategy not in obj["Strategies"]:
-
-                obj["Strategies"][strategy] = {
-                    "Overall_Change": 0, "Today_Change": 0, "Avg_ROV": [], "Positions": 0}
-
-            obj["Strategies"][strategy]["Overall_Change"] += round(
-                ((last_price / buy_price) - 1) * 100, 2)
-
-            obj["Strategies"][strategy]["Today_Change"] += round(
-                ((last_price / opening_price) - 1) * 100, 2)
-
-            obj["Strategies"][strategy]["Positions"] += 1
-
-            obj["Strategies"][strategy]["Avg_ROV"].append(round(
-                ((last_price / buy_price) - 1) * 100, 2))
-
-            position["Date"] = position["Date"].strftime("%Y-%m-%d %H:%M:%S")
-
-        if len(today_avg_rov) > 0:
-
-            obj["Today"]["Avg_ROV"] = round(statistics.mean(today_avg_rov), 2)
-
-        else:
-
-            obj["Today"]["Avg_ROV"] = 0
-
-        if len(overall_avg_rov) > 0:
-
-            obj["Overall"]["Avg_ROV"] = round(
-                statistics.mean(overall_avg_rov), 2)
-
-        else:
-
-            obj["Overall"]["Avg_ROV"] = 0
-
-        obj["Overall"]["ROV"] = round(obj["Overall"]["ROV"], 2)
-
-        obj["Overall"]["Profit_Loss"] = round(obj["Overall"]["Profit_Loss"], 2)
-
-        obj["Today"]["ROV"] = round(obj["Today"]["ROV"], 2)
-
-        obj["Today"]["Profit_Loss"] = round(obj["Today"]["Profit_Loss"], 2)
-
-        for k, v in obj["Strategies"].items():
-
-            if len(v["Avg_ROV"]) > 0:
-
-                v["Avg_ROV"] = round(statistics.mean(v["Avg_ROV"]), 2)
-
-            else:
-
-                v["Avg_ROV"] = 0
-
-        obj["Positions"].reverse()
-
-        return jsonify(obj), 200
+        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
 
     except Exception as e:
 
-        logger.ERROR()
+        return jsonify({"error": "ERROR"}), 500
 
-        return jsonify({"error": e}), 500
+
+@api.route("/account_balance/<account_id>", methods=["GET"])
+@token_required
+def fetch_account_balance(current_user, account_id):
+
+    try:
+
+        # query the user collection for account balance
+        balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+            "Accounts"][account_id]["Account_Balance"]
+
+        return jsonify({"account_balance": balance, "account_id": account_id}), 200
+
+    except KeyError:
+
+        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
+
+    except Exception:
+
+        return jsonify({"error": "An Error Occured"}), 500
+
+
+@api.route("/rate_of_return/<account_id>", methods=["GET"])
+@token_required
+def fetch_rate_of_return(current_user, account_id):
+    # (Current Account Balance - Account Balance from 30 days ago)/(Account balance from 30 days ago) * 12 [if you want yearly RoR]
+    try:
+
+        # query the user collection for account balance
+        balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+            "Accounts"][account_id]["Account_Balance"]
+
+        # date 30 days ago
+        days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        days_ago_balance = mongo.db.balance_history.find_one(
+            {"Account_ID": int(account_id), "Date": days_ago})["Balance"]
+
+        if days_ago != None:
+
+            rate_of_return = round(
+                (balance - days_ago_balance) / days_ago_balance, 4)
+
+        else:
+
+            rate_of_return = 0
+
+        return jsonify({"rate_of_return": rate_of_return, "account_id": account_id}), 200
+
+    except KeyError:
+
+        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
+
+    except Exception:
+
+        return jsonify({"error": "An Error Occured"}), 500
+
+@api.route("/number_of_holdings/<account_id>", methods=["GET"])
+@token_required
+def fetch_number_of_holdings(current_user, account_id):
+  
+    try:
+
+        number_of_holdings = mongo.db.open_positions.find({"Account_ID" : int(account_id)}).count()
+        
+        return jsonify({"number_of_holdings": number_of_holdings, "account_id": account_id}), 200
+
+    except KeyError:
+
+        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
+
+    except Exception:
+
+        return jsonify({"error": "An Error Occured"}), 500
+
+
+##########################################################
+## PUT REQUESTS ##########################################
+
+@api.route("/change_account_status/<account_id>", methods=["PUT"])
+@token_required
+def change_account_status(current_user, account_id):
+
+    try:
+
+        status = request.json["account_status"]
+
+        if status == "Active":
+
+            status = False
+
+        else:
+
+            status = True
+
+        mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
+            "$set": {f"Accounts.{account_id}.Active": status}})
+
+        return jsonify({"account_status": status, "account_id": account_id}), 201
+
+    except KeyError:
+
+        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
+
+    except Exception as e:
+
+        return jsonify({"error": "ERROR"}), 500
