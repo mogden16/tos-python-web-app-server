@@ -1,4 +1,5 @@
 import json
+from typing import Type
 from flask import Blueprint, current_app, request
 from assets.logger import Logger
 from flask import jsonify
@@ -61,134 +62,392 @@ def token_required(f):
 
     return decorated
 
+
+def exception_handler(func):
+
+    def wrapper(*args, **kwargs):
+
+        account_id = kwargs["account_id"]
+
+        try:
+
+            return func(*args, **kwargs)
+
+        except KeyError:
+
+            return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
+
+        except TypeError:
+
+            return jsonify({"error": "ERROR"}), 400
+
+        except Exception:
+
+            return jsonify({"error": "ERROR"}), 500
+
+    return wrapper
+
 ##########################################################
 ## GET REQUESTS ##########################################
 
 
+@exception_handler
 @api.route("/account_status/<account_id>", methods=["GET"])
 @token_required
 def fetch_account_status(current_user, account_id):
 
-    try:
+    # query the user collection for account status
+    status = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["Active"]
 
-        # query the user collection for account status
-        status = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
-            "Accounts"][account_id]["Active"]
-
-        return jsonify({"account_status": status, "account_id": account_id}), 200
-
-    except KeyError:
-
-        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
-
-    except Exception as e:
-
-        return jsonify({"error": "ERROR"}), 500
+    return jsonify({"account_status": status, "account_id": account_id}), 200
 
 
+@exception_handler
 @api.route("/account_balance/<account_id>", methods=["GET"])
 @token_required
 def fetch_account_balance(current_user, account_id):
 
-    try:
+    # query the user collection for account balance
+    balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["Account_Balance"]
 
-        # query the user collection for account balance
-        balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
-            "Accounts"][account_id]["Account_Balance"]
-
-        return jsonify({"account_balance": balance, "account_id": account_id}), 200
-
-    except KeyError:
-
-        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
-
-    except Exception:
-
-        return jsonify({"error": "An Error Occured"}), 500
+    return jsonify({"account_balance": balance, "account_id": account_id}), 200
 
 
+@exception_handler
 @api.route("/rate_of_return/<account_id>", methods=["GET"])
 @token_required
 def fetch_rate_of_return(current_user, account_id):
     # (Current Account Balance - Account Balance from 30 days ago)/(Account balance from 30 days ago) * 12 [if you want yearly RoR]
-    try:
+    # query the user collection for account balance
+    balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["Account_Balance"]
 
-        # query the user collection for account balance
-        balance = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
-            "Accounts"][account_id]["Account_Balance"]
+    # date 30 days ago
+    days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        # date 30 days ago
-        days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    balance_history = mongo.db.balance_history.find_one(
+        {"Account_ID": int(account_id), "Date": days_ago})
 
-        days_ago_balance = mongo.db.balance_history.find_one(
-            {"Account_ID": int(account_id), "Date": days_ago})["Balance"]
+    if balance_history != None:
 
-        if days_ago != None:
+        days_ago_balance = balance_history["Balance"]
 
-            rate_of_return = round(
-                (balance - days_ago_balance) / days_ago_balance, 4)
+        rate_of_return = round(
+            (balance - days_ago_balance) / days_ago_balance, 4)
 
-        else:
+    else:
 
-            rate_of_return = 0
+        rate_of_return = 0
 
-        return jsonify({"rate_of_return": rate_of_return, "account_id": account_id}), 200
+    return jsonify({"rate_of_return": rate_of_return, "account_id": account_id}), 200
 
-    except KeyError:
 
-        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
-
-    except Exception:
-
-        return jsonify({"error": "An Error Occured"}), 500
-
+@exception_handler
 @api.route("/number_of_holdings/<account_id>", methods=["GET"])
 @token_required
 def fetch_number_of_holdings(current_user, account_id):
-  
-    try:
 
-        number_of_holdings = mongo.db.open_positions.find({"Account_ID" : int(account_id)}).count()
-        
-        return jsonify({"number_of_holdings": number_of_holdings, "account_id": account_id}), 200
+    number_of_holdings = mongo.db.open_positions.find(
+        {"Account_ID": int(account_id)}).count()
 
-    except KeyError:
+    return jsonify({"number_of_holdings": number_of_holdings, "account_id": account_id}), 200
 
-        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
 
-    except Exception:
+@exception_handler
+@api.route("/account_balance_history/<account_id>", methods=["GET"])
+@token_required
+def fetch_account_balance_history(current_user, account_id):
 
-        return jsonify({"error": "An Error Occured"}), 500
+    days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
+    account_balance_history = [history for history in mongo.db.balance_history.find(
+        {"Account_ID": int(account_id)}) if history["Date"] >= days_ago]
+
+    for i in account_balance_history:
+
+        del i["_id"]
+
+        del i["Trader"]
+
+        del i["Account_ID"]
+
+    return jsonify({"account_balance_history": account_balance_history, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/profit_loss_history/<account_id>", methods=["GET"])
+@token_required
+def fetch_profit_loss_history(current_user, account_id):
+
+    days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    profit_loss_history = [history for history in mongo.db.profit_loss_history.find(
+        {"Account_ID": int(account_id)}) if history["Date"] >= days_ago]
+
+    for i in profit_loss_history:
+
+        del i["_id"]
+
+        del i["Trader"]
+
+        del i["Account_ID"]
+
+    return jsonify({"profit_loss_history": profit_loss_history, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/queued/<account_id>", methods=["GET"])
+@token_required
+def fetch_queued(current_user, account_id):
+
+    queued = [queued for queued in mongo.db.queue.find(
+        {"Account_ID": int(account_id)})]
+
+    return jsonify({"queued": queued, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/forbidden_symbols/<account_id>", methods=["GET"])
+@token_required
+def fetch_forbidden_symbols(current_user, account_id):
+
+    forbidden_symbols = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["forbidden_symbols"]
+
+    return jsonify({"forbidden_symbols": forbidden_symbols, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/best_performing_equities/<account_id>", methods=["GET"])
+@token_required
+def fetch_best_performing_equities(current_user, account_id):
+
+    symbols = {}
+
+    obj = [{
+        "Symbol": "ABC",
+        "ROV": 2.3
+    },
+        {
+        "Symbol": "BCA",
+        "ROV": 3.2
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": -1.1
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": 1.7
+    },
+        {
+        "Symbol": "AMC",
+        "ROV": 4.4
+    },
+        {
+        "Symbol": "ZWQ",
+        "ROV": -3.2
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": 1.7
+    },
+        {
+        "Symbol": "AMC",
+        "ROV": 1.3
+    },
+        {
+        "Symbol": "QQQ",
+        "ROV": -1.3
+    },
+        {
+        "Symbol": "SPY",
+        "ROV": 1.9
+    },
+        {
+        "Symbol": "SPY",
+        "ROV": -4.2
+    }
+    ]
+
+    # get top 3 best performing symbols via close_positions
+    closed_positions = mongo.db.closed_positions.find(
+        {"Account_ID": int(account_id)})
+
+    for position in obj:
+
+        symbol = position["Symbol"]
+
+        if symbol not in symbols:
+
+            symbols[symbol] = 0
+
+        symbols[symbol] += position["ROV"]
+
+    best_performing_equities = [{"Symbol": symbol[0], "ROV": round(symbol[1], 2)} for symbol in sorted(
+        symbols.items(), key=lambda t: t[::-1], reverse=True)[0:3]]
+
+    return jsonify({"best_performing_equities": best_performing_equities, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/worst_performing_equities/<account_id>", methods=["GET"])
+@token_required
+def fetch_worst_performing_equities(current_user, account_id):
+
+    symbols = {}
+
+    obj = [{
+        "Symbol": "ABC",
+        "ROV": 2.3
+    },
+        {
+        "Symbol": "BCA",
+        "ROV": 3.2
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": -1.1
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": 1.7
+    },
+        {
+        "Symbol": "AMC",
+        "ROV": 4.4
+    },
+        {
+        "Symbol": "ZWQ",
+        "ROV": -3.2
+    },
+        {
+        "Symbol": "ABC",
+        "ROV": 1.7
+    },
+        {
+        "Symbol": "AMC",
+        "ROV": 1.3
+    },
+        {
+        "Symbol": "QQQ",
+        "ROV": -1.3
+    },
+        {
+        "Symbol": "SPY",
+        "ROV": 1.9
+    },
+        {
+        "Symbol": "SPY",
+        "ROV": -4.2
+    }
+    ]
+
+    # get top 3 worse performing symbols via close_positions
+    closed_positions = mongo.db.closed_positions.find(
+        {"Account_ID": int(account_id)})
+
+    for position in obj:
+
+        symbol = position["Symbol"]
+
+        if symbol not in symbols:
+
+            symbols[symbol] = 0
+
+        symbols[symbol] += position["ROV"]
+
+    worst_performing_equities = [{"Symbol": symbol[0], "ROV": round(symbol[1], 2)} for symbol in sorted(
+        symbols.items(), key=lambda t: t[::-1])[0:3]]
+
+    return jsonify({"worst_performing_equities": worst_performing_equities, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/strategies/<account_id>", methods=["GET"])
+@token_required
+def fetch_strategies(current_user, account_id):
+
+    # get all data from closed_positions
+
+    strategies = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["forbidden_symbols"]
+
+    return jsonify({"strategies": strategies, "account_id": account_id}), 200
+
+
+@exception_handler
+@api.route("/open_positions/<account_id>", methods=["GET"])
+@token_required
+def fetch_open_positions(current_user, account_id):
+
+    open_positions = {}
+
+    wow = [
+        {
+            "Strategy": "TEST1",
+            "Symbol": "ABC"
+        },
+        {
+            "Strategy": "TEST1",
+            "Symbol": "BCA"
+        },
+        {
+            "Strategy": "TEST1",
+            "Symbol": "AMC"
+        },
+        {
+            "Strategy": "TEST1",
+            "Symbol": "QQQ"
+        },
+        {
+            "Strategy": "TEST2",
+            "Symbol": "ABC"
+        },
+        {
+            "Strategy": "TEST2",
+            "Symbol": "SPY"
+        }
+    ]
+
+    # for position in mongo.db.open_positions.find({"Account_ID": int(account_id)}):
+    for position in wow:
+
+        strategy = position["Strategy"]
+
+        if strategy not in open_positions:
+
+            open_positions[strategy] = []
+
+        open_positions[strategy].append(position["Symbol"])
+
+    open_positions = [{"Strategy": k, "Symbols": v}
+                      for k, v in open_positions.items()]
+
+    return jsonify({"open_positions": open_positions, "account_id": account_id}), 200
 
 ##########################################################
 ## PUT REQUESTS ##########################################
 
+
+@exception_handler
 @api.route("/change_account_status/<account_id>", methods=["PUT"])
 @token_required
 def change_account_status(current_user, account_id):
 
-    try:
+    status = request.json["account_status"]
 
-        status = request.json["account_status"]
+    if status == "Active":
 
-        if status == "Active":
+        status = False
 
-            status = False
+    else:
 
-        else:
+        status = True
 
-            status = True
+    mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
+        "$set": {f"Accounts.{account_id}.Active": status}})
 
-        mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
-            "$set": {f"Accounts.{account_id}.Active": status}})
-
-        return jsonify({"account_status": status, "account_id": account_id}), 201
-
-    except KeyError:
-
-        return jsonify({"error": f"Account ID {account_id} Not Found"}), 400
-
-    except Exception as e:
-
-        return jsonify({"error": "ERROR"}), 500
+    return jsonify({"account_status": status, "account_id": account_id}), 201
