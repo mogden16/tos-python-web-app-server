@@ -11,6 +11,7 @@ import statistics
 from pprint import pprint
 from bson.objectid import ObjectId
 import uuid
+from api.helpers import maxDrawDown, sharpeRatio
 
 from assets.current_datetime import getDatetime
 from extensions import mongo
@@ -370,17 +371,100 @@ def fetch_worst_performing_equities(current_user, account_id):
 @token_required
 def fetch_strategies(current_user, account_id):
 
-    # get all data from closed_positions
+    # STRATEGY, ROV, AVG ROV, WINS, LOSS, FLAT, TOTAL
 
-    strategies = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
-        "Accounts"][account_id]["forbidden_symbols"]
+    closed_positions = mongo.db.closed_positions.find(
+        {"Account_ID": int(account_id)})
+
+    strategy_results = mongo.db.users.find_one({"_id": ObjectId(current_user["id"]["$oid"])})[
+        "Accounts"][account_id]["Strategies"]
+
+    for v in strategy_results.values():
+
+        if v["Active"]:
+
+            v["Active"] = "Active"
+
+        else:
+
+            v["Active"] = "Inactive"
+
+        v.update({
+            "Wins": 0,
+            "Loss": 0,
+            "Profit_Loss": 0,
+            "Avg_ROV": [],
+            "Drawdowns": []})
+
+    for position in closed_positions:
+
+        strategy = position["Strategy"]
+
+        if position["ROV"] > 0:
+
+            strategy_results[strategy]["Wins"] += 1
+
+        elif position["ROV"] < 0:
+
+            strategy_results[strategy]["Loss"] += 1
+
+        else:
+
+            continue
+
+        strategy_results[strategy]["Profit_Loss"] += (
+            (position["Sell_Price"] * position["Qty"]) - (position["Buy_Price"] * position["Qty"]))
+
+        strategy_results[strategy]["Avg_ROV"].append(position["ROV"])
+
+        strategy_results[strategy]["Drawdowns"].append(
+            position["Sell_Price"] - position["Buy_Price"])
+
+    strategies = []
+
+    for key, value in strategy_results.items():
+
+        value["MDD"] = maxDrawDown(value)
+
+        if len(value["Avg_ROV"]) > 1:
+
+            value["Avg_ROV"] = round(statistics.mean(value["Avg_ROV"]), 2)
+
+            value["SR"] = sharpeRatio(value)
+
+        else:
+
+            value["Avg_ROV"] = 0
+
+            value["SR"] = 0
+
+        value["Profit_Loss"] = round(value["Profit_Loss"], 2)
+
+        value["Strategy"] = key
+
+        try:
+
+            value["WRP"] = round(((value["Wins"] - value["Loss"]) /
+                                  value["Wins"]) * 100, 2)
+
+        except:
+
+            value["WRP"] = 0
+
+        del strategy_results[key]["Drawdowns"]
+
+        del strategy_results[key]["Wins"]
+
+        del strategy_results[key]["Loss"]
+
+        strategies.append(value)
 
     return jsonify({"strategies": strategies, "account_id": account_id}), 200
 
 
-@exception_handler
-@api.route("/open_positions/<account_id>", methods=["GET"])
-@token_required
+@ exception_handler
+@ api.route("/open_positions/<account_id>", methods=["GET"])
+@ token_required
 def fetch_open_positions(current_user, account_id):
 
     open_positions = {}
@@ -451,3 +535,57 @@ def change_account_status(current_user, account_id):
         "$set": {f"Accounts.{account_id}.Active": status}})
 
     return jsonify({"account_status": status, "account_id": account_id}), 201
+
+
+@exception_handler
+@api.route("/add_forbidden_symbol/<account_id>", methods=["PUT"])
+@token_required
+def add_forbidden_symbol(current_user, account_id):
+
+    symbol = request.json["symbol"]
+
+    mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
+        "$push": {f"Accounts.{account_id}.forbidden_symbols": symbol.upper()}})
+
+    return jsonify({"account_id": account_id}), 201
+
+
+@exception_handler
+@api.route("/update_strategy/<account_id>", methods=["PUT"])
+@token_required
+def update_strategy(current_user, account_id):
+
+    data = request.json["data"]
+
+    strategy = data["Strategy"]
+
+    shares = data["Shares"]
+
+    status = data["Status"]
+
+    if status == "Active":
+
+        status = True
+
+    else:
+
+        status = False
+
+    mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
+        "$set": {f"Accounts.{account_id}.Strategies.{strategy}": {"Active": status, "Shares": shares}}})
+
+    return jsonify({"account_id": account_id}), 201
+
+##########################################################
+## DELETE REQUESTS ##########################################
+
+
+@exception_handler
+@api.route("/remove_forbidden_symbol/<account_id>/<symbol>", methods=["DELETE"])
+@token_required
+def remove_forbidden_symbol(current_user, account_id, symbol):
+
+    mongo.db.users.update_one({"_id": ObjectId(current_user["id"]["$oid"])}, {
+        "$pull": {f"Accounts.{account_id}.forbidden_symbols": symbol.upper()}})
+
+    return jsonify({"account_id": account_id}), 201
